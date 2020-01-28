@@ -169,18 +169,6 @@ func init() {
 
 }
 
-// func defaultFromConfig() {
-// 	rootCmd.PersistentFlags().VisitAll(func(f *pflag.Flag) {
-// 		if !rootCmd.Flags().Changed(f.Name) && viper.IsSet(f.Name) {
-// 			fmt.Println(fmt.Sprintf("%v", viper.Get(f.Name)))
-// 			err := f.Value.Set(fmt.Sprintf("%v", viper.Get(f.Name)))
-// 			if err != nil {
-// 				log.Panicf("could not assign default value %v", err)
-// 			}
-// 		}
-// 	})
-// }
-
 func initConfig() {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
