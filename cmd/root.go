@@ -48,6 +48,11 @@ var rootCmd = &cobra.Command{
 	Version: "0.1",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		toggl.DisableLog()
+
+		if flagShouldDefaultToConfig(cmd, "token") {
+			token = viper.GetString("token")
+		}
+
 		session := toggl.OpenSession(token)
 
 		account, err := session.GetAccount()
@@ -91,6 +96,10 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("invalid end date: %w", err)
 		}
 
+		if flagShouldDefaultToConfig(cmd, "exclude-dates") {
+			excludeDates = viper.GetStringSlice("exclude-dates")
+		}
+
 		fY, fM, fD := from.Date()
 		beginningOfStartDate := time.Date(fY, fM, fD, 0, 0, 0, 0, from.Location())
 
@@ -114,6 +123,10 @@ var rootCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+func flagShouldDefaultToConfig(cmd *cobra.Command, name string) bool {
+	return !cmd.PersistentFlags().Changed(name) && viper.IsSet(name)
 }
 
 func Execute() {
@@ -140,21 +153,33 @@ func init() {
 		"Toggl projects")
 	rootCmd.PersistentFlags().DurationVarP(
 		&workDayDuration, "work-day-duration", "d", time.Hour*8,
-		"base duration of a working day (default it 8 hours)")
+		"base duration of a working day")
 	rootCmd.PersistentFlags().StringSliceVarP(
 		&excludeDaysOfWeek, "non-working-days", "n", []string{"Saturday", "Sunday"},
-		"list of days of the week that shouldn't be count as working days (default is Saturday and Sunday)")
+		"list of days of the week that shouldn't be count as working days")
 	rootCmd.PersistentFlags().StringSliceVarP(
 		&excludeDates, "exclude-dates", "x", []string{""},
 		"list of dates that shouldn't be count as working days")
 	rootCmd.PersistentFlags().StringVarP(
 		&startDate, "start-date", "s", now.BeginningOfMonth().String(),
-		"start date of period for which to calculate overtime (default is beginning of the current month)")
+		"start date of period for which to calculate overtime")
 	rootCmd.PersistentFlags().StringVarP(
 		&endDate, "end-date", "e", now.EndOfDay().String(),
-		"end date of period for which to calculate overtime (defult is end of today)")
+		"end date of period for which to calculate overtime")
 
 }
+
+// func defaultFromConfig() {
+// 	rootCmd.PersistentFlags().VisitAll(func(f *pflag.Flag) {
+// 		if !rootCmd.Flags().Changed(f.Name) && viper.IsSet(f.Name) {
+// 			fmt.Println(fmt.Sprintf("%v", viper.Get(f.Name)))
+// 			err := f.Value.Set(fmt.Sprintf("%v", viper.Get(f.Name)))
+// 			if err != nil {
+// 				log.Panicf("could not assign default value %v", err)
+// 			}
+// 		}
+// 	})
+// }
 
 func initConfig() {
 	if cfgFile != "" {
@@ -172,7 +197,5 @@ func initConfig() {
 
 	viper.AutomaticEnv()
 
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
-	}
+	viper.ReadInConfig()
 }
