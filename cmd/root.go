@@ -17,27 +17,107 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"os"
+	"time"
 
+	"github.com/jinzhu/now"
+	"github.com/spf13/cobra"
+
+	linq "github.com/ahmetb/go-linq/v3"
+	toggl "github.com/jason0x43/go-toggl"
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 )
 
-var cfgFile string
+var (
+	cfgFile         string
+	token           string
+	workspace       string
+	projects        []string
+	workDayDuration time.Duration
+	nonWorkingDays  []string
+	startDate       string
+	endDate         string
+)
 
-// rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "toggl-overtime",
-	Short: "Calculates overtime based on time logged with Toggl app.",
-	Long:  `Calculates overtime based on time logged with Toggl app.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	Run: func(cmd *cobra.Command, args []string) {},
+	Use:     "toggl-overtime",
+	Short:   "Calculates overtime based on time logged with Toggl app.",
+	Long:    `Calculates overtime based on time logged with Toggl app.`,
+	Version: "0.1",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// fmt.Printf("config: %s\n", cfgFile)
+		// fmt.Printf("token: %s\n", token)
+		// fmt.Printf("workspace: %s\n", workspace)
+		// fmt.Printf("projects: %v\n", projects)
+		// fmt.Printf("work-day-duration: %v\n", workDayDuration)
+		// fmt.Printf("non-working-days: %v\n", nonWorkingDays)
+		// fmt.Printf("start-date: %s\n", startDate)
+		// fmt.Printf("end-date: %s\n", endDate)
+
+		toggl.DisableLog()
+		session := toggl.OpenSession(token)
+
+		account, err := session.GetAccount()
+		if err != nil {
+			return fmt.Errorf("could not get toggl account: %w", err)
+		}
+
+		var (
+			wid    int
+			wfound bool
+		)
+		for _, w := range account.Data.Workspaces {
+			if w.Name == workspace {
+				wid = w.ID
+				wfound = true
+			}
+		}
+		if !wfound {
+			return fmt.Errorf("workspace with name '%s' does not exist", workspace)
+		}
+
+		report, err := session.GetSummaryReport(wid, startDate, endDate)
+		if err != nil {
+			return fmt.Errorf("could not get summary report: %w", err)
+		}
+
+		var totalWorkedTime time.Duration
+		for _, data := range report.Data {
+			if linq.From(projects).Contains(data.Title.Project) {
+				totalWorkedTime += time.Millisecond * time.Duration(data.Time)
+			}
+		}
+
+		from, err := now.Parse(startDate)
+		if err != nil {
+			return fmt.Errorf("invalid start date: %w", err)
+		}
+
+		until, err := now.Parse(endDate)
+		if err != nil {
+			return fmt.Errorf("invalid end date: %w", err)
+		}
+
+		fY, fM, fD := from.Date()
+		beginningOfStartDate := time.Date(fY, fM, fD, 0, 0, 0, 0, from.Location())
+		uY, uM, uD := until.Date()
+		endOfEndDate := time.Date(uY, uM, uD, 23, 59, 50, 0, until.Location())
+
+		var expectedWorkTime time.Duration
+		for day := beginningOfStartDate; day.Before(endOfEndDate); day = day.Add(time.Hour * 24) {
+			if !linq.From(nonWorkingDays).Contains(day.Weekday().String()) {
+				expectedWorkTime += workDayDuration
+			}
+		}
+
+		overtime := totalWorkedTime - expectedWorkTime
+		fmt.Println(overtime)
+
+		return nil
+	},
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-// This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
@@ -48,38 +128,49 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
+	rootCmd.PersistentFlags().StringVar(
+		&cfgFile, "config", "",
+		"config file (default is $HOME/.toggl-overtime.yaml)")
+	rootCmd.PersistentFlags().StringVarP(
+		&token, "token", "t", "",
+		"Toggl API authorization token")
+	rootCmd.PersistentFlags().StringVarP(
+		&workspace, "workspace", "w", "Personal",
+		"Toggl workspace")
+	rootCmd.PersistentFlags().StringSliceVarP(
+		&projects, "projects", "p", []string{"Work"},
+		"Toggl projects")
+	rootCmd.PersistentFlags().DurationVarP(
+		&workDayDuration, "work-day-duration", "d", time.Hour*8,
+		"base duration of a working day (default it 8 hours)")
+	rootCmd.PersistentFlags().StringSliceVarP(
+		&nonWorkingDays, "non-working-days", "n", []string{"Saturday", "Sunday"},
+		"list of days of the week that shouldn't be count as working days (default is Saturday and Sunday)")
+	rootCmd.PersistentFlags().StringVarP(
+		&startDate, "start-date", "s", now.BeginningOfMonth().String(),
+		"start date of period for which to calculate overtime (default is beginning of the current month)")
+	rootCmd.PersistentFlags().StringVarP(
+		&endDate, "end-date", "e", now.EndOfDay().String(),
+		"end date of period for which to calculate overtime (defult is end of today)")
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.toggl-overtime.yaml)")
-
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
 }
 
-// initConfig reads in config file and ENV variables if set.
 func initConfig() {
 	if cfgFile != "" {
-		// Use config file from the flag.
 		viper.SetConfigFile(cfgFile)
 	} else {
-		// Find home directory.
 		home, err := homedir.Dir()
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
 
-		// Search config in home directory with name ".toggl-overtime" (without extension).
 		viper.AddConfigPath(home)
 		viper.SetConfigName(".toggl-overtime")
 	}
 
-	viper.AutomaticEnv() // read in environment variables that match
+	viper.AutomaticEnv()
 
-	// If a config file is found, read it in.
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Println("Using config file:", viper.ConfigFileUsed())
 	}
