@@ -30,14 +30,15 @@ import (
 )
 
 var (
-	cfgFile         string
-	token           string
-	workspace       string
-	projects        []string
-	workDayDuration time.Duration
-	nonWorkingDays  []string
-	startDate       string
-	endDate         string
+	cfgFile           string
+	token             string
+	workspace         string
+	projects          []string
+	workDayDuration   time.Duration
+	excludeDaysOfWeek []string
+	excludeDates      []string
+	startDate         string
+	endDate           string
 )
 
 var rootCmd = &cobra.Command{
@@ -46,15 +47,6 @@ var rootCmd = &cobra.Command{
 	Long:    `Calculates overtime based on time logged with Toggl app.`,
 	Version: "0.1",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// fmt.Printf("config: %s\n", cfgFile)
-		// fmt.Printf("token: %s\n", token)
-		// fmt.Printf("workspace: %s\n", workspace)
-		// fmt.Printf("projects: %v\n", projects)
-		// fmt.Printf("work-day-duration: %v\n", workDayDuration)
-		// fmt.Printf("non-working-days: %v\n", nonWorkingDays)
-		// fmt.Printf("start-date: %s\n", startDate)
-		// fmt.Printf("end-date: %s\n", endDate)
-
 		toggl.DisableLog()
 		session := toggl.OpenSession(token)
 
@@ -101,17 +93,23 @@ var rootCmd = &cobra.Command{
 
 		fY, fM, fD := from.Date()
 		beginningOfStartDate := time.Date(fY, fM, fD, 0, 0, 0, 0, from.Location())
+
 		uY, uM, uD := until.Date()
-		endOfEndDate := time.Date(uY, uM, uD, 23, 59, 50, 0, until.Location())
+		endOfEndDate := time.Date(uY, uM, uD, 23, 59, 59, 0, until.Location())
 
 		var expectedWorkTime time.Duration
 		for day := beginningOfStartDate; day.Before(endOfEndDate); day = day.Add(time.Hour * 24) {
-			if !linq.From(nonWorkingDays).Contains(day.Weekday().String()) {
-				expectedWorkTime += workDayDuration
+			if linq.From(excludeDaysOfWeek).Contains(day.Weekday().String()) {
+				continue
 			}
+			if linq.From(excludeDates).Contains(day.Format("2006-01-02")) {
+				continue
+			}
+			expectedWorkTime += workDayDuration
 		}
 
 		overtime := totalWorkedTime - expectedWorkTime
+
 		fmt.Println(overtime)
 
 		return nil
@@ -144,8 +142,11 @@ func init() {
 		&workDayDuration, "work-day-duration", "d", time.Hour*8,
 		"base duration of a working day (default it 8 hours)")
 	rootCmd.PersistentFlags().StringSliceVarP(
-		&nonWorkingDays, "non-working-days", "n", []string{"Saturday", "Sunday"},
+		&excludeDaysOfWeek, "non-working-days", "n", []string{"Saturday", "Sunday"},
 		"list of days of the week that shouldn't be count as working days (default is Saturday and Sunday)")
+	rootCmd.PersistentFlags().StringSliceVarP(
+		&excludeDates, "exclude-dates", "x", []string{""},
+		"list of dates that shouldn't be count as working days")
 	rootCmd.PersistentFlags().StringVarP(
 		&startDate, "start-date", "s", now.BeginningOfMonth().String(),
 		"start date of period for which to calculate overtime (default is beginning of the current month)")
